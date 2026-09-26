@@ -1,0 +1,104 @@
+"""
+Скачивание аудиодорожки из видео (YouTube, Instagram Reels, TikTok) через yt-dlp.
+
+ffmpeg не ставится через apt на всех хостингах, поэтому используем
+imageio-ffmpeg — pip-пакет с готовым статическим бинарником внутри.
+
+YouTube в 2026 году постоянно меняет протокол стриминга и то, какие
+"клиенты" (player_client) у yt-dlp работают — это открытая гонка между
+YouTube и разработчиками yt-dlp. Поэтому перебираем НЕСКОЛЬКО вариантов
+по очереди вместо одного жёстко зашитого.
+"""
+import os
+import logging
+import asyncio
+import imageio_ffmpeg
+import yt_dlp
+
+from config import DOWNLOADS_DIR, COOKIES_FILE
+
+logger = logging.getLogger(__name__)
+
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+
+# Порядок важен: пробуем от "скорее всего рабочего сейчас" к запасным.
+# None в конце — не подменяем клиента вообще, пусть yt-dlp сам решает.
+PLAYER_CLIENT_FALLBACKS = [
+    ["default", "web_embedded"],
+    ["tv", "web_safari"],
+    ["ios"],
+    ["android"],
+    ["mweb"],
+    ["web_safari"],
+    None,
+]
+
+
+def _cookies_active() -> bool:
+    return bool(COOKIES_FILE and os.path.exists(COOKIES_FILE))
+
+
+def _build_ydl_opts(out_dir: str, player_clients: list[str] | None) -> dict:
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(out_dir, "%(id)s.%(ext)s"),
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "128",
+        }],
+        "ffmpeg_location": FFMPEG_PATH,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+    }
+    if player_clients is not None:
+        ydl_opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
+
+    if _cookies_active():
+        ydl_opts["cookiefile"] = COOKIES_FILE
+        safe_clients = [c for c in (player_clients or []) if c != "tv"] or ["web_safari"]
+        ydl_opts["extractor_args"] = {"youtube": {"player_client": safe_clients}}
+    return ydl_opts
+
+
+def _is_youtube(url: str) -> bool:
+    return "youtube.com" in url.lower() or "youtu.be" in url.lower()
+
+
+def _download_sync(url: str, out_dir: str) -> tuple[str, str]:
+    os.makedirs(out_dir, exist_ok=True)
+
+    client_variants = PLAYER_CLIENT_FALLBACKS if _is_youtube(url) else [PLAYER_CLIENT_FALLBACKS[0]]
+
+    last_error = None
+    cookies_used = _cookies_active()
+    for i, player_clients in enumerate(client_variants, start=1):
+        ydl_opts = _build_ydl_opts(out_dir, player_clients)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                video_id = info["id"]
+                title = info.get("title", video_id)
+                audio_path = os.path.join(out_dir, f"{video_id}.mp3")
+                if i > 1:
+                    logger.info(
+                        f"Скачано успешно с {i}-й попытки, "
+                        f"player_client={player_clients}, cookies={cookies_used}"
+                    )
+                return audio_path, title
+        except yt_dlp.utils.DownloadError as e:
+            last_error = e
+            logger.warning(
+                f"Не удалось скачать (попытка {i}/{len(client_variants)}, "
+                f"player_client={player_clients}, cookies={cookies_used}): {e}"
+            )
+            continue
+
+    raise last_error
+
+
+async def download_audio(url: str) -> tuple[str, str]:
+    """Скачивает аудио по ссылке на видео. Возвращает (путь_к_файлу, название)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _download_sync, url, DOWNLOADS_DIR)
