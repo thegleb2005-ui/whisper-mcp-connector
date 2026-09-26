@@ -14,6 +14,7 @@ import logging
 import uvicorn
 from starlette.responses import JSONResponse
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 import config
 from downloader import download_audio
@@ -51,7 +52,14 @@ async def transcribe_video(url: str) -> str:
 def _build_app():
     """Собирает Starlette-приложение и оборачивает его простой проверкой
     ключа в заголовке — иначе твой публичный URL сможет дёргать кто угодно."""
-    app = mcp.streamable_http_app()
+    # По умолчанию библиотека MCP принимает запросы только на localhost
+    # (защита от DNS rebinding, нужна локальным серверам). Наш сервер
+    # публичный, стоит за прокси хостинга и защищён секретным ключом в
+    # адресе, поэтому проверку заголовка Host отключаем — иначе любой запрос
+    # на домен Bothost получает 421 Misdirected Request.
+    app = mcp.streamable_http_app(
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
 
     original_app_call = app
 
