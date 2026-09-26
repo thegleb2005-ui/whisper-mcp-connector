@@ -55,7 +55,17 @@ def _build_app():
 
     original_app_call = app
 
+    # Открытые адреса без ключа — для проверок "живости" со стороны хостинга.
+    # Прокси (Traefik) может включать маршрут только если приложение отвечает
+    # 200 на корень. Никаких данных тут не отдаём, только статус.
+    public_paths = {"/", "/health"}
+
     async def authed_app(scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") in public_paths:
+            response = JSONResponse({"status": "ok", "service": "whisper-transcriber"})
+            await response(scope, receive, send)
+            return
+
         if scope["type"] == "http":
             headers = dict(scope.get("headers", []))
             auth_header = headers.get(b"authorization", b"").decode()
