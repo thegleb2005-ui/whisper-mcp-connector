@@ -56,25 +56,48 @@ def _build_app():
     original_app_call = app
 
     # Открытые адреса без ключа — для проверок "живости" со стороны хостинга.
-    # Прокси (Traefik) может включать маршрут только если приложение отвечает
-    # 200 на корень. Никаких данных тут не отдаём, только статус.
     public_paths = {"/", "/health"}
 
+    # Защита ключом В АДРЕСЕ: https://домен/mcp/<API_KEY>
+    # Claude пока требует одобрения Anthropic для своих заголовков, поэтому
+    # ключ передаётся прямо в пути. Сервер переписывает путь на /mcp и
+    # передаёт запрос дальше. Старый вариант (заголовок Authorization: Bearer)
+    # тоже продолжает работать.
+    secret_path = f"/mcp/{config.API_KEY}"
+
     async def authed_app(scope, receive, send):
-        if scope["type"] == "http" and scope.get("path") in public_paths:
+        if scope["type"] != "http":
+            await original_app_call(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+
+        if path in public_paths:
             response = JSONResponse({"status": "ok", "service": "whisper-transcriber"})
             await response(scope, receive, send)
             return
 
-        if scope["type"] == "http":
+        # Вариант 1: ключ в адресе
+        if path == secret_path or path == secret_path + "/":
+            scope = dict(scope)
+            scope["path"] = "/mcp"
+            scope["raw_path"] = b"/mcp"
+            await original_app_call(scope, receive, send)
+            return
+
+        # Вариант 2: ключ в заголовке
+        if path in ("/mcp", "/mcp/"):
             headers = dict(scope.get("headers", []))
             auth_header = headers.get(b"authorization", b"").decode()
-            expected = f"Bearer {config.API_KEY}"
-            if auth_header != expected:
-                response = JSONResponse({"error": "Unauthorized"}, status_code=401)
-                await response(scope, receive, send)
+            if auth_header == f"Bearer {config.API_KEY}":
+                await original_app_call(scope, receive, send)
                 return
-        await original_app_call(scope, receive, send)
+
+        # Всё остальное — 404, без подсказок. Важно отдавать именно 404, а не
+        # 401: на 401 Claude решил бы, что сервер требует OAuth, и пытался бы
+        # пройти авторизацию.
+        response = JSONResponse({"error": "Not found"}, status_code=404)
+        await response(scope, receive, send)
 
     return authed_app
 
