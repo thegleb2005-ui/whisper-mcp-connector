@@ -25,8 +25,24 @@ WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
 # Таймаут на распознавание одного 10-минутного куска в отдельном процессе.
 WHISPER_SUBPROCESS_TIMEOUT = int(os.getenv("WHISPER_SUBPROCESS_TIMEOUT", "900"))
 
-# --- YouTube cookies (запасной путь, если блокирует скачивание) ---
+# --- YouTube cookies (нужны, если YouTube блокирует скачивание) ---
+# Два способа:
+#  1) COOKIES_B64 — содержимое cookies.txt, закодированное в base64, прямо в
+#     переменной окружения. Рекомендуется: файл не попадает в git и не
+#     теряется при пересборке. При запуске сервер сам развернёт его в файл.
+#  2) COOKIES_FILE — путь к уже лежащему на сервере cookies.txt.
 COOKIES_FILE = os.getenv("COOKIES_FILE", "")
+_COOKIES_B64 = os.getenv("COOKIES_B64", "").strip()
+
+if _COOKIES_B64:
+    import base64
+    _cookies_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+    try:
+        with open(_cookies_path, "wb") as _f:
+            _f.write(base64.b64decode(_COOKIES_B64))
+        COOKIES_FILE = _cookies_path
+    except Exception as _e:
+        print(f"ВНИМАНИЕ: не удалось раскодировать COOKIES_B64: {_e}")
 
 # --- Пути ---
 DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "downloads")

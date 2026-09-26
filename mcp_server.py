@@ -42,9 +42,21 @@ async def transcribe_video(url: str) -> str:
         url: Прямая ссылка на видео.
     """
     logger.info(f"Запрос на транскрибацию: {url}")
-    audio_path, title = await download_audio(url)
+    try:
+        audio_path, title = await download_audio(url)
+    except Exception as e:
+        logger.exception("Не удалось скачать видео")
+        return (
+            f"ОШИБКА СКАЧИВАНИЯ: {type(e).__name__}: {e}\n\n"
+            f"Если в тексте есть 'Sign in to confirm you're not a bot' — YouTube "
+            f"блокирует IP сервера, нужны cookies (см. README)."
+        )
     logger.info(f"Аудио скачано: {title}")
-    transcript = await transcribe_audio(audio_path)
+    try:
+        transcript = await transcribe_audio(audio_path)
+    except Exception as e:
+        logger.exception("Не удалось распознать речь")
+        return f"ОШИБКА РАСПОЗНАВАНИЯ: {type(e).__name__}: {e}"
     logger.info(f"Распознано {len(transcript)} символов")
     return f"[{title}]\n\n{transcript}"
 
@@ -115,6 +127,7 @@ if __name__ == "__main__":
     app = _build_app()
     logger.info(
         f"MCP-сервер запускается на порту {config.PORT} "
-        f"(WHISPER_MODEL_SIZE={config.WHISPER_MODEL_SIZE!r})"
+        f"(WHISPER_MODEL_SIZE={config.WHISPER_MODEL_SIZE!r}, "
+        f"cookies={'ДА' if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE) else 'НЕТ'})"
     )
     uvicorn.run(app, host="0.0.0.0", port=config.PORT)
