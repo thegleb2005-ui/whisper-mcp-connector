@@ -24,13 +24,12 @@ FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 # Порядок важен: пробуем от "скорее всего рабочего сейчас" к запасным.
 # None в конце — не подменяем клиента вообще, пусть yt-dlp сам решает.
 PLAYER_CLIENT_FALLBACKS = [
-    ["default", "web_embedded"],
+    None,  # стандартный выбор yt-dlp — с Deno это лучший вариант
     ["tv", "web_safari"],
     ["ios"],
     ["android"],
     ["mweb"],
     ["web_safari"],
-    None,
 ]
 
 
@@ -57,8 +56,13 @@ def _build_ydl_opts(out_dir: str, player_clients: list[str] | None) -> dict:
 
     if _cookies_active():
         ydl_opts["cookiefile"] = COOKIES_FILE
-        safe_clients = [c for c in (player_clients or []) if c != "tv"] or ["web_safari"]
-        ydl_opts["extractor_args"] = {"youtube": {"player_client": safe_clients}}
+        # Клиент "tv" с cookies не смешиваем — может оборвать сессию аккаунта.
+        if player_clients is not None:
+            safe_clients = [c for c in player_clients if c != "tv"]
+            if safe_clients:
+                ydl_opts["extractor_args"] = {"youtube": {"player_client": safe_clients}}
+            else:
+                ydl_opts.pop("extractor_args", None)
     return ydl_opts
 
 

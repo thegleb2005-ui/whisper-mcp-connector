@@ -1,7 +1,11 @@
 mcp>=2.0
 uvicorn>=0.30
 starlette>=0.37
-yt-dlp>=2026.1.1
+# [default] подтягивает yt-dlp-ejs — решатель JS-задач YouTube.
+# deno — JavaScript-движок, без него YouTube с 2026 года почти не отдаёт форматы
+# (особенно при входе через cookies). yt-dlp находит его сам.
+yt-dlp[default]>=2026.8.19
+deno>=2.0
 imageio-ffmpeg>=0.5
 faster-whisper>=1.0
 python-dotenv>=1.0
