@@ -5,3 +5,4 @@ venv/
 *.pyc
 cookies.txt
 .DS_Store
+.DS_Store
